@@ -52,6 +52,7 @@ def stream_to_target(stream, target, config={}):
         max_batch_rows = config.get('max_batch_rows', 200000)
         max_batch_size = config.get('max_batch_size', 104857600)  # 100MB
         batch_detection_threshold = config.get('batch_detection_threshold', max(max_batch_rows / 40, 50))
+        batch_force_flush = config.get('batch_force_flush', False)
 
         line_count = 0
         for line in stream:
@@ -64,7 +65,7 @@ def stream_to_target(stream, target, config={}):
                           line
                           )
             if line_count > 0 and line_count % batch_detection_threshold == 0:
-                state_tracker.flush_streams()
+                state_tracker.flush_streams(force=batch_force_flush)
             line_count += 1
 
         state_tracker.flush_streams(force=True)
