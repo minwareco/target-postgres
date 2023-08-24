@@ -1,4 +1,4 @@
-version: 2.0
+version: 2.1
 
 filters: &filters
   filters:
@@ -13,12 +13,23 @@ filters__tags: &filters__tags
       only: /^v[0-9]+(\.[0-9]+)*$/
 
 workflows:
-  version: 2
   test:
     jobs:
       - cache:
           <<: *filters
       - build:
+          <<: *filters
+          requires:
+            - cache
+      - test--15:
+          <<: *filters
+          requires:
+            - cache
+      - test--14:
+          <<: *filters
+          requires:
+            - cache
+      - test--13:
           <<: *filters
           requires:
             - cache
@@ -34,22 +45,6 @@ workflows:
           <<: *filters
           requires:
             - cache
-      - test--9.6:
-          <<: *filters
-          requires:
-            - cache
-      - test--9.5:
-          <<: *filters
-          requires:
-            - cache
-      - test--9.4:
-          <<: *filters
-          requires:
-            - cache
-      - test--8.4:
-          <<: *filters
-          requires:
-            - cache
       - test--migrations:
           <<: *filters
           requires:
@@ -58,11 +53,6 @@ workflows:
           <<: *filters
           requires:
             - test--12
-            - test--11
-            - test--10
-            - test--9.6
-            - test--9.5
-            - test--9.4
       - test-release:
           <<: *filters__tags
           requires:
@@ -79,20 +69,46 @@ workflows:
           requires:
             - approve-release
 
-cache: &cache deps-v6-{{ checksum "setup.py" }}
+cache: &cache deps-v7-{{ checksum "poetry.lock" }}-{{ checksum ".circleci/config.yml" }}
 
-py: &py python:3.7.7-stretch
+py: &py python:3.7.15-bullseye
 
 restore__cache: &restore__cache
   restore_cache:
     keys:
       - *cache
 
+# Simple checkout command to pull external forks.
+# The CircleCI util does not work without setting up SSH keys
+# which we technically do not need for open-source repos.
+checkout_command: &checkout_command
+  run:
+    name: checkout
+    command: |
+      git clone https://github.com/datamill-co/target-postgres .
+      if [[ "$CIRCLE_BRANCH" =~ ^pull\/* ]]; then
+        git fetch origin refs/pull/${CIRCLE_PR_NUMBER}/head
+        git checkout ${CIRCLE_SHA1}
+      else
+        git checkout ${CIRCLE_BRANCH}
+      fi
+
+install_poetry: &install_poetry
+  run:
+    name: Install poetry
+    command: |
+      export POETRY_HOME=/opt/poetry
+      python -m venv $POETRY_HOME
+      $POETRY_HOME/bin/pip install -U pip
+      $POETRY_HOME/bin/pip install poetry==1.2.2
+      $POETRY_HOME/bin/poetry --version
+
 test__base: &test__base
   working_directory: /code/
   steps:
-    - checkout
+    - *checkout_command
     - *restore__cache
+    - *install_poetry
     - attach_workspace:
         at: "./"
 
@@ -117,15 +133,17 @@ jobs:
     docker:
       - image: *py
     steps:
-      - checkout
+      - *checkout_command
       - *restore__cache
+      - *install_poetry
 
       - run:
           name: Install target-postgres
           command: |
             python -m venv venv/target-postgres
             source venv/target-postgres/bin/activate
-            pip install -e .[tests]
+            pip install -U pip
+            /opt/poetry/bin/poetry install --with tests
             deactivate
 
       - run:
@@ -137,7 +155,8 @@ jobs:
           command: |
             python -m venv venv/tap-github
             source venv/tap-github/bin/activate
-            pip install tap-github
+            pip install -U pip
+            pip install git+https://github.com/MeltanoLabs/tap-github.git@v1.1.0
             deactivate
 
       - run:
@@ -145,6 +164,7 @@ jobs:
           command: |
             python -m venv venv/tap-postgres
             source venv/tap-postgres/bin/activate
+            pip install -U pip
             pip install tap-postgres
             deactivate
 
@@ -154,17 +174,45 @@ jobs:
             - "./venv"
             - "/usr/local/bin"
             - "/usr/local/lib/python3.7/site-packages"
+            - "/opt/poetry"
 
       - persist_to_workspace:
           root: "./"
           paths:
             - "./venv"
 
+  test--15:
+    <<: *test__base
+    docker:
+      - image: *py
+      - image: postgres:15.0
+        environment:
+          POSTGRES_DB: target_postgres_test
+          POSTGRES_PASSWORD: postgres
+
+  test--14:
+    <<: *test__base
+    docker:
+      - image: *py
+      - image: postgres:14.5
+        environment:
+          POSTGRES_DB: target_postgres_test
+          POSTGRES_PASSWORD: postgres
+
+  test--13:
+    <<: *test__base
+    docker:
+      - image: *py
+      - image: postgres:13.8
+        environment:
+          POSTGRES_DB: target_postgres_test
+          POSTGRES_PASSWORD: postgres
+
   test--12:
     <<: *test__base
     docker:
       - image: *py
-      - image: postgres:12.2
+      - image: postgres:12.12
         environment:
           POSTGRES_DB: target_postgres_test
           POSTGRES_PASSWORD: postgres
@@ -173,7 +221,7 @@ jobs:
     <<: *test__base
     docker:
       - image: *py
-      - image: postgres:11.7
+      - image: postgres:11.17-bullseye
         environment:
           POSTGRES_DB: target_postgres_test
           POSTGRES_PASSWORD: postgres
@@ -182,43 +230,7 @@ jobs:
     <<: *test__base
     docker:
       - image: *py
-      - image: postgres:10.12
-        environment:
-          POSTGRES_DB: target_postgres_test
-          POSTGRES_PASSWORD: postgres
-
-  test--9.6:
-    <<: *test__base
-    docker:
-      - image: *py
-      - image: postgres:9.6.17
-        environment:
-          POSTGRES_DB: target_postgres_test
-          POSTGRES_PASSWORD: postgres
-
-  test--9.5:
-    <<: *test__base
-    docker:
-      - image: *py
-      - image: postgres:9.5.21
-        environment:
-          POSTGRES_DB: target_postgres_test
-          POSTGRES_PASSWORD: postgres
-
-  test--9.4:
-    <<: *test__base
-    docker:
-      - image: *py
-      - image: postgres:9.4.26
-        environment:
-          POSTGRES_DB: target_postgres_test
-          POSTGRES_PASSWORD: postgres
-
-  test--8.4:
-    <<: *test__base
-    docker:
-      - image: *py
-      - image: postgres:8.4.22
+      - image: postgres:10.22-bullseye
         environment:
           POSTGRES_DB: target_postgres_test
           POSTGRES_PASSWORD: postgres
@@ -227,12 +239,12 @@ jobs:
     working_directory: /code/
     docker:
       - image: *py
-      - image: postgres:9.4.26
+      - image: postgres:12.12
         environment:
           POSTGRES_DB: target_postgres_test
           POSTGRES_PASSWORD: postgres
     steps:
-      - checkout
+      - *checkout_command
       - *restore__cache
       - attach_workspace:
           at: "./"
@@ -252,7 +264,7 @@ jobs:
             source venv/tap-github/bin/activate
             cd /code/.circleci/integration/tap-github
 
-            tap-github --config config.json --properties properties.json > /code/artifacts/data/tap
+            tap-github --config config.json --catalog catalog.json > /code/artifacts/data/tap
 
             deactivate
 
@@ -260,7 +272,8 @@ jobs:
           name: Data -> Target
           command: |
             source venv/target-postgres/bin/activate
-            pip install .
+            pip install -U pip
+            /opt/poetry/bin/poetry install
             cd /code/.circleci/integration
 
             cat /code/artifacts/data/tap | target-postgres --config target-config.json
@@ -287,6 +300,7 @@ jobs:
           name: Repeatability of Data -> Target
           command: |
             source venv/target-postgres/bin/activate
+            pip install -U pip
             pip install .
             cd /code/.circleci/integration
 
@@ -294,7 +308,7 @@ jobs:
 
             deactivate
 
-            cd /code
+            cd /code/
 
             source venv/tap-postgres/bin/activate
             cd /code/.circleci/integration/tap-postgres
@@ -319,13 +333,14 @@ jobs:
     working_directory: /code/
     docker:
       - image: *py
-      - image: postgres:9.4.26
+      - image: postgres:12.12
         environment:
           POSTGRES_DB: target_postgres_test
           POSTGRES_PASSWORD: postgres
     steps:
-      - checkout
+      - *checkout_command
       - *restore__cache
+      - *install_poetry
       - attach_workspace:
           at: "./"
 
@@ -349,7 +364,7 @@ jobs:
     docker:
       - image: *py
     steps:
-      - checkout
+      - *checkout_command
       - *restore__cache
       - attach_workspace:
           at: "./"
@@ -358,9 +373,10 @@ jobs:
           command: |
             source venv/target-postgres/bin/activate
 
+            pip install -U pip
             pip install --upgrade setuptools wheel twine
 
-            python setup.py sdist bdist_wheel
+            /opt/poetry/bin/poetry build
 
             deactivate
 
@@ -374,7 +390,7 @@ jobs:
     docker:
       - image: *py
     steps:
-      - checkout
+      - *checkout_command
       - *restore__cache
       - attach_workspace:
           at: "./"
@@ -382,7 +398,7 @@ jobs:
           name: Validate tag
           command: |
             export TAG=`echo $CIRCLE_TAG | sed 's/v//'`
-            VERSION=`grep version setup.py | sed 's/^.*version="\(.*\)",.*$/\1/'`
+            VERSION=`grep version pyproject.toml | sed 's/^.*version = "\(.*\)",.*$/\1/'`
 
             echo tag: $TAG equals version: $VERSION '?'
 
@@ -404,7 +420,7 @@ jobs:
     docker:
       - image: *py
     steps:
-      - checkout
+      - *checkout_command
       - *restore__cache
       - attach_workspace:
           at: "./"
