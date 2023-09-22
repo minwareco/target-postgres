@@ -1,6 +1,7 @@
 from copy import deepcopy
 import json
 import uuid
+import time
 
 import arrow
 from jsonschema import Draft4Validator, FormatChecker
@@ -36,6 +37,7 @@ class BufferedSingerStream():
                  invalid_records_threshold=None,
                  max_rows=200000,
                  max_buffer_size=104857600,  # 100MB
+                 max_buffer_seconds=60 * 15, # 15 minutes
                  **kwargs):
         """
         :param invalid_records_detect: Defaults to True when value is None
@@ -50,6 +52,7 @@ class BufferedSingerStream():
         self.invalid_records = []
         self.max_rows = max_rows
         self.max_buffer_size = max_buffer_size
+        self.max_buffer_seconds = max_buffer_seconds
 
         self.invalid_records_detect = invalid_records_detect
         self.invalid_records_threshold = invalid_records_threshold
@@ -62,6 +65,7 @@ class BufferedSingerStream():
         self.__buffer = []
         self.__count = 0
         self.__size = 0
+        self.__time = None
         self.__lifetime_max_version = None
 
     def update_schema(self, schema, key_properties):
@@ -118,6 +122,10 @@ class BufferedSingerStream():
             if self.__size >= self.max_buffer_size:
                 return True
 
+            elapsed_time = time.perf_counter() - self.__time
+            if elapsed_time >= self.max_buffer_seconds:
+                return True
+
         return False
 
     @property
@@ -151,6 +159,8 @@ class BufferedSingerStream():
             self.__buffer.append(record_message)
             self.__size += get_line_size(record_message)
             self.__count += 1
+            if self.__time is None:
+                self.__time = time.perf_counter()
         elif self.invalid_records_detect \
                 and len(self.invalid_records) >= self.invalid_records_threshold:
             raise SingerStreamError(
@@ -193,6 +203,7 @@ class BufferedSingerStream():
         self.__buffer = []
         self.__size = 0
         self.__count = 0
+        self.__time = None
         return _buffer
 
     def peek_invalid_records(self):
