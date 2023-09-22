@@ -5,6 +5,7 @@ import pkg_resources
 import sys
 import threading
 import decimal
+import time
 
 import singer
 from singer import utils, metadata, metrics
@@ -53,6 +54,7 @@ def stream_to_target(stream, target, config={}):
         max_batch_size = config.get('max_batch_size', 104857600)  # 100MB
         batch_detection_threshold = config.get('batch_detection_threshold', max(max_batch_rows / 40, 50))
         batch_force_flush = config.get('batch_force_flush', False)
+        max_buffer_seconds = config.get('max_buffer_seconds', 60 * 15) # 15 minutes
 
         line_count = 0
         for line in stream:
@@ -62,10 +64,12 @@ def stream_to_target(stream, target, config={}):
                           invalid_records_threshold,
                           max_batch_rows,
                           max_batch_size,
+                          max_buffer_seconds,
                           line
                           )
             if line_count > 0 and line_count % batch_detection_threshold == 0:
                 state_tracker.flush_streams(force=batch_force_flush)
+
             line_count += 1
 
         state_tracker.flush_streams(force=True)
@@ -90,7 +94,7 @@ def _report_invalid_records(streams):
 
 
 def _line_handler(state_tracker, target, invalid_records_detect, invalid_records_threshold, max_batch_rows,
-                  max_batch_size, line):
+                  max_batch_size, max_buffer_seconds, line):
     try:
         line_data = json.loads(line, parse_float=decimal.Decimal)
     except json.decoder.JSONDecodeError:
@@ -130,6 +134,8 @@ def _line_handler(state_tracker, target, invalid_records_detect, invalid_records
                 buffered_stream.max_rows = max_batch_rows
             if max_batch_size:
                 buffered_stream.max_buffer_size = max_batch_size
+            if max_buffer_seconds:
+                buffered_stream.max_buffer_seconds = max_buffer_seconds
 
             state_tracker.register_stream(stream, buffered_stream)
         else:
