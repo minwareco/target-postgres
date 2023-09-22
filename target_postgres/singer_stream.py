@@ -2,7 +2,6 @@ from copy import deepcopy
 import json
 import uuid
 import time
-import sys
 
 import arrow
 from jsonschema import Draft4Validator, FormatChecker
@@ -125,8 +124,6 @@ class BufferedSingerStream():
 
             elapsed_time = time.perf_counter() - self.__time
             if elapsed_time >= self.max_buffer_seconds:
-                sys.stderr.write('BUFFER FULL {} >= {}\n'.format(elapsed_time, self.max_buffer_seconds))
-                sys.stderr.flush()
                 return True
 
         return False
