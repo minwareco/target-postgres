@@ -1,5 +1,5 @@
 [project]
-name = "singer-target-postgres"
+name = "target_postgres"
 version = "0.2.4"
 description = "Singer.io target for loading data into postgres"
 readme = "README.md"
